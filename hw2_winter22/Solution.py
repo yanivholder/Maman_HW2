@@ -9,6 +9,7 @@ from Business.Player import Player
 from Business.Stadium import Stadium
 from psycopg2 import sql
 
+
 ###########################################################################
 #                    Auxiliary functions                                  #
 ###########################################################################
@@ -40,42 +41,67 @@ def check_none(attribute):
     return 'NULL' if not attribute else attribute
 
 
-# TODO: change to_print to False
-def sql_query(query, to_print=True):
+# TODO: change to_print and print_exceptions to False
+def sql_query(query: str, to_print=False, to_commit=True, print_exceptions=True):
     """A wrapper function to all sql queries to avoid duplications"""
+    query = query.replace("\n", "")
     conn = None
     # default values to return if no exception happened
-    ret_val = ReturnValue.OK
-    row_effected, entries = 0, Connector.ResultSet()
+    res_dict = {"ret_val": ReturnValue.OK,
+                "row_effected": 0,
+                "entries": Connector.ResultSet()}
 
     try:
         conn = Connector.DBConnector()
         row_effected, entries = conn.execute(query, printSchema=to_print)
         # TODO: should we always commit?
-        conn.commit()
+        # if to_commit:
+        #     conn.commit()
     except (DatabaseException.ConnectionInvalid,
             DatabaseException.database_ini_ERROR,
-            DatabaseException.UNKNOWN_ERROR):
-        return ReturnValue.ERROR
+            DatabaseException.UNKNOWN_ERROR) as e:
+        if print_exceptions:
+            print(e)
+        res_dict["ret_val"] = ReturnValue.ERROR
     except (DatabaseException.CHECK_VIOLATION,
-            DatabaseException.NOT_NULL_VIOLATION):
-        return ReturnValue.BAD_PARAMS
-    except DatabaseException.FOREIGN_KEY_VIOLATION:
-        return ReturnValue.NOT_EXISTS
-    except DatabaseException.UNIQUE_VIOLATION:
-        return ReturnValue.ALREADY_EXISTS
-    except:
-        return ReturnValue.ERROR
+            DatabaseException.NOT_NULL_VIOLATION,
+            DatabaseException.FOREIGN_KEY_VIOLATION) as e:
+        if print_exceptions:
+            print(e)
+        res_dict["ret_val"] = ReturnValue.BAD_PARAMS
+    # except  as e:
+    #     if print_exceptions:
+    #         print(e)
+    #     res_dict["ret_val"] = ReturnValue.NOT_EXISTS
+    except DatabaseException.UNIQUE_VIOLATION as e:
+        if print_exceptions:
+            print(e)
+        res_dict["ret_val"] = ReturnValue.ALREADY_EXISTS
+    except Exception as e:
+        if print_exceptions:
+            print(e)
+        res_dict["ret_val"] = ReturnValue.ERROR
+    else:
+        res_dict["row_effected"] = row_effected
+        res_dict["entries"] = entries
     finally:
         if conn:
             # TODO: check how to use rollback
             conn.close()
-        return ReturnValue.OK, row_effected, entries
+        return res_dict
+
 
 ###########################################################################
 #                           HW functions                                  #
 ###########################################################################
 
+#        CREATE TABLE BelongTo(
+#            StadiumID INTEGER UNIQUE,
+#            TeamID INTEGER UNIQUE,
+#            FOREIGN KEY (StadiumID) REFERENCES Stadiums(StadiumID) ON DELETE CASCADE,
+#            FOREIGN KEY (TeamID) REFERENCES Teams(TeamID) ON DELETE CASCADE,
+#            PRIMARY KEY (StadiumID, TeamID));
+#
 
 def createTables():
     # TODO: maybe add VIEWS?
@@ -98,16 +124,11 @@ def createTables():
         CREATE TABLE Stadiums(
             StadiumID INTEGER NOT NULL UNIQUE CHECK(StadiumID > 0),
             Capacity INTEGER NOT NULL CHECK(Capacity > 0),
+            BelongsTo INTEGER UNIQUE,
+            FOREIGN KEY (BelongsTo) REFERENCES Teams(TeamID) ON DELETE CASCADE,
             PRIMARY KEY (StadiumID));
-        
-        CREATE TABLE BelongTo(
-            StadiumID INTEGER UNIQUE,
-            TeamID INTEGER UNIQUE,
-            FOREIGN KEY (StadiumID) REFERENCES Stadiums(StadiumID) ON DELETE CASCADE,
-            FOREIGN KEY (TeamID) REFERENCES Teams(TeamID) ON DELETE CASCADE,
-            PRIMARY KEY (StadiumID, TeamID));
             
-        CREATE TABLE Match(
+        CREATE TABLE Matches(
             MatchID INTEGER NOT NULL UNIQUE CHECK(MatchID > 0),
             Competition TEXT NOT NULL CHECK(Competition='International' OR Competition='Domestic'),
             Home INTEGER,
@@ -115,6 +136,14 @@ def createTables():
             FOREIGN KEY (Home) REFERENCES Teams(TeamID) ON DELETE CASCADE,
             FOREIGN KEY (Away) REFERENCES Teams(TeamID) ON DELETE CASCADE,
             PRIMARY KEY (MatchID));
+            
+        CREATE TABLE Goals(
+            MatchID INTEGER,
+            PlayerID INTEGER,
+            Goals INTEGER NOT NULL CHECK(Goals > 0),
+            FOREIGN KEY (MatchID) REFERENCES Matches(MatchID) ON DELETE CASCADE,
+            FOREIGN KEY (PlayerID) REFERENCES Players(PlayerID) ON DELETE CASCADE,
+            PRIMARY KEY (MatchID, PlayerID));
     ''')
 
 
@@ -130,17 +159,19 @@ def dropTables():
     # TODO: check if DROP use is legal
     # TODO: why eilon used EXISTS and CASCADE
     sql_query('''
-        DROP TABLE Teams;
-        DROP TABLE Players;
-        DROP TABLE Stadiums;
+        DROP TABLE IF EXISTS Teams CASCADE;
+        DROP TABLE IF EXISTS Players CASCADE;
+        DROP TABLE IF EXISTS Stadiums CASCADE;
+        DROP TABLE IF EXISTS Matches CASCADE;
+        DROP TABLE IF EXISTS Goals CASCADE;
     ''')
 
 
 def addTeam(teamID: int) -> ReturnValue:
-    ret_val, _, _ = sql_query(f'''
+    res_dict = sql_query(f'''
         INSERT INTO Teams VALUES({teamID});
     ''')
-    return ret_val
+    return res_dict["ret_val"]
 
 
 def addMatch(match: Match) -> ReturnValue:
@@ -149,112 +180,127 @@ def addMatch(match: Match) -> ReturnValue:
     home_id = check_none(match.getHomeTeamID())
     away_id = check_none(match.getAwayTeamID())
 
-    ret_val, _, _ = sql_query(f'''
+    res_dict = sql_query(f'''
         INSERT INTO Matches
-        VALUES({match_id}, {competition}, {home_id}, {away_id});
+        VALUES({match_id}, '{competition}', {home_id}, {away_id});
     ''')
-    return ret_val
+    return res_dict["ret_val"]
 
 
 def getMatchProfile(matchID: int) -> Match:
-    ret_val, _, entries = sql_query(f'''
-            SELECT *
-            FROM Matches
-            WHERE MatchID = {matchID}
-        ''')
-    if ret_val != ReturnValue.OK:
+    res_dict = sql_query(f'''
+        SELECT *gwe
+        FROM Matches
+        WHERE MatchID = {matchID};
+    ''')
+    if res_dict["ret_val"] != ReturnValue.OK:
         return Match.badMatch()
     else:
-        return res_to_match(entries)
+        return res_to_match(res_dict["entries"])
 
 
 def deleteMatch(match: Match) -> ReturnValue:
-    ret_val, row_effected, _ = sql_query(f'''
+    res_dict = sql_query(f'''
         DELETE FROM Matches
-        WHERE MatchID = {check_none(match.getMatchID())}
+        WHERE MatchID = {check_none(match.getMatchID())};
     ''')
-    if ret_val.rows_affected == 0:
+    if res_dict["rows_affected"] == 0:
         return ReturnValue.NOT_EXISTS
-    return ret_val
+    return res_dict["ret_val"]
 
 
 def addPlayer(player: Player) -> ReturnValue:
-    ret_val, _, _ = sql_query(f'''
-            INSERT INTO Matches
-            VALUES({check_none(player.getPlayerID())};
-        ''')
-    return ret_val
+    player_id = check_none(player.getPlayerID())
+    team_id = check_none(player.getTeamID())
+    player_age = check_none(player.getAge())
+    player_height = check_none(player.getHeight())
+    preferred_foot = check_none(player.getFoot())
+
+    res_dict = sql_query(f'''
+        INSERT INTO Players
+        VALUES({player_id}, {team_id}, {player_age}, {player_height}, '{preferred_foot}');
+    ''')
+    return res_dict["ret_val"]
 
 
 def getPlayerProfile(playerID: int) -> Player:
-    ret_val, _, entries = sql_query(f'''
-                SELECT *
-                FROM Players
-                WHERE PlayerID = {playerID}
-            ''')
-    if ret_val != ReturnValue.OK:
+    res_dict = sql_query(f'''
+        SELECT *
+        FROM Players
+        WHERE PlayerID = {playerID};
+    ''')
+    if res_dict["ret_val"] != ReturnValue.OK or res_dict["rows_affected"] == 0:
         return Player.badPlayer()
     else:
-        return res_to_player(entries)
+        return res_to_player(res_dict["entries"])
 
 
 def deletePlayer(player: Player) -> ReturnValue:
-    ret_val, row_effected, _ = sql_query(f'''
+    res_dict = sql_query(f'''
         DELETE FROM Players
-        WHERE MatchID = {check_none(player.getPlayerID())}
+        WHERE MatchID = {check_none(player.getPlayerID())};
     ''')
-    if ret_val.rows_affected == 0:
+    if res_dict["rows_affected"] == 0:
         return ReturnValue.NOT_EXISTS
-    return ret_val
+    return res_dict["ret_val"]
 
 
 def addStadium(stadium: Stadium) -> ReturnValue:
-    ret_val = None
     stadiumId = check_none(stadium.getStadiumID())
-    if stadium.getBelongsTo():
-        ret_val, _, _ = sql_query(f'''
-                INSERT INTO Matches
-                VALUES({stadiumId});
-                INSERT INTO BelongTo
-                VALUES({stadiumId}, {check_none(stadium.getBelongsTo())};
-            ''')
-    else:
-        ret_val, _, _ = sql_query(f'''
-                INSERT INTO Stadiums
-                INSERT
-                VALUES({check_none(stadium.getPlayerID())};
-            ''')
-    return ret_val
+    capacity = check_none(stadium.getCapacity())
+    belongs_to = check_none(stadium.getBelongsTo())
+    res_dict = sql_query(f'''
+        INSERT INTO Stadiums
+        VALUES({stadiumId}, {capacity}, {belongs_to});
+    ''')
+    return res_dict["ret_val"]
 
 
 def getStadiumProfile(stadiumID: int) -> Stadium:
-    ret_val, _, entries = sql_query(f'''
-                    SELECT *
-                    FROM Stadiums
-                    WHERE StadiumID = {stadiumID}
-                ''')
-    if ret_val != ReturnValue.OK:
+    res_dict = sql_query(f'''
+        SELECT *
+        FROM Stadiums
+        WHERE StadiumID = {stadiumID};
+    ''')
+    if res_dict["ret_val"] != ReturnValue.OK:
         return Stadium.badStadium()
     else:
-        return res_to_stadium(entries)
+        return res_to_stadium(res_dict["entries"])
 
 
 def deleteStadium(stadium: Stadium) -> ReturnValue:
-    ret_val, row_effected, _ = sql_query(f'''
-            DELETE FROM Stadiums
-            WHERE StadiumID = {check_none(stadium.getStadiumID())}
-        ''')
-    if ret_val.rows_affected == 0:
+    res_dict = sql_query(f'''
+        DELETE FROM Stadiums
+        WHERE StadiumID = {check_none(stadium.getStadiumID())};
+    ''')
+    if res_dict["rows_affected"] == 0:
         return ReturnValue.NOT_EXISTS
-    return ret_val
+    return res_dict["ret_val"]
 
 
 def playerScoredInMatch(match: Match, player: Player, amount: int) -> ReturnValue:
-    pass
+    match_id = check_none(match.getMatchID())
+    player_id = check_none(player.getPlayerID())
+    goal_amount = check_none(amount)
 
+    res_dict = sql_query(f'''
+          INSERT INTO Goals
+          VALUES({match_id}, {player_id}, {goal_amount});
+      ''')
+    return res_dict["ret_val"]
 
+# TODO: UPDATE instead of INSERT consequences: player may or may not have scored in the match prior to this action
 def playerDidntScoreInMatch(match: Match, player: Player) -> ReturnValue:
-    pass
+    match_id = check_none(match.getMatchID())
+    player_id = check_none(player.getPlayerID())
+
+    res_dict = sql_query(f'''
+        DELETE FROM Goals
+        WHERE PlayerID ={player_id} AND MatchID = {match_id};
+      ''')
+    if res_dict["ret_val"] == ReturnValue.NOT_EXISTS:
+        return ReturnValue.Ok
+    return res_dict["ret_val"]
 
 
 def matchInStadium(match: Match, stadium: Stadium, attendance: int) -> ReturnValue:
@@ -278,7 +324,16 @@ def playerIsWinner(playerID: int, matchID: int) -> bool:
 
 
 def getActiveTallTeams() -> List[int]:
-    pass
+    res_dict = sql_query(f'''
+        SELECT TeamID
+        FROM PLAYERS
+        WHERE Height >= 190
+        GROUP BY TeamID
+        HAVING COUNT(TeamID) >= 2
+        ORDER BY TeamID DESC
+        LIMIT 5;
+      ''')
+    return res_dict["ret_val"]
 
 
 def getActiveTallRichTeams() -> List[int]:

@@ -6,8 +6,12 @@ from Business.Match import Match
 from Business.Stadium import Stadium
 from Business.Player import Player
 
+
+class TestOurs(AbstractTest):
+
+    def test_a(self) -> None:
+        pass
+
+
 if __name__ == '__main__':
-    # Solution.createTables()
-    print("###############")
-    Solution.dropTables()
-    print("after")
+    unittest.main(verbosity=2, exit=False)
