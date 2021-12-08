@@ -157,7 +157,7 @@ def deleteMatch(match: Match) -> ReturnValue:
 def addPlayer(player: Player) -> ReturnValue:
     ret_val, _, _ = sql_query(f'''
             INSERT INTO Matches
-            VALUES({checkNone(player.getPlayerID())};
+            VALUES({checkNone(player.getPlayerID())});
         ''')
     return ret_val
 
@@ -179,7 +179,7 @@ def getPlayerProfile(playerID: int) -> Player:
 def deletePlayer(player: Player) -> ReturnValue:
     ret_val, row_effected, _ = sql_query(f'''
         DELETE FROM Players
-        WHERE MatchID = {checkNone(player.getPlayerID())}
+        WHERE PlayerID = {checkNone(player.getPlayerID())}
     ''')
     if ret_val.rows_affected == 0:
         return ReturnValue.NOT_EXISTS
@@ -187,11 +187,21 @@ def deletePlayer(player: Player) -> ReturnValue:
 
 
 def addStadium(stadium: Stadium) -> ReturnValue:
-    ret_val, _, _ = sql_query(f'''
-            INSERT INTO Stadiums
-            INSERT
-            VALUES({checkNone(stadium.getPlayerID())};
-        ''')
+    ret_val = None
+    stadiumId = checkNone(stadium.getStadiumID())
+    if stadium.getBelongsTo():
+        ret_val, _, _ = sql_query(f'''
+                INSERT INTO Matches
+                VALUES({stadiumId});
+                INSERT INTO BelongTo
+                VALUES({stadiumId}, {checkNone(stadium.getBelongsTo())};
+            ''')
+    else:
+        ret_val, _, _ = sql_query(f'''
+                INSERT INTO Stadiums
+                VALUES({checkNone(stadium.getPlayerID())};
+            ''')
+
     return ret_val
 
 
@@ -206,9 +216,8 @@ def getStadiumProfile(stadiumID: int) -> Stadium:
     else:
         return Stadium(
             stadiumID=entries.rows[0][0],
-            competition=entries.rows[0][1],
-            homeTeamID=entries.rows[0][2],
-            awayTeamID=entries.rows[0][3]
+            capacity=entries.rows[0][1],
+            belongsTo=entries.rows[0][2],
         )
 
 
