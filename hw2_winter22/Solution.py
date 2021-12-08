@@ -9,8 +9,33 @@ from Business.Player import Player
 from Business.Stadium import Stadium
 from psycopg2 import sql
 
+###########################################################################
+#                    Auxiliary functions                                  #
+###########################################################################
 
-def checkNone(attribute):
+
+def res_to_player(result_set: Connector.ResultSet) -> Player:
+    return Player(playerID=result_set.rows[0][0])
+
+
+def res_to_match(result_set: Connector.ResultSet) -> Match:
+    return Match(
+        matchID=result_set.rows[0][0],
+        competition=result_set.rows[0][1],
+        homeTeamID=result_set.rows[0][2],
+        awayTeamID=result_set.rows[0][3]
+    )
+
+
+def res_to_stadium(result_set: Connector.ResultSet) -> Stadium:
+    return Stadium(
+        stadiumID=result_set.rows[0][0],
+        capacity=result_set.rows[0][1],
+        belongsTo=result_set.rows[0][2]
+    )
+
+
+def check_none(attribute):
     """A function to convert python's None to NULL"""
     return 'NULL' if not attribute else attribute
 
@@ -46,6 +71,10 @@ def sql_query(query, to_print=True):
             # TODO: check how to use rollback
             conn.close()
         return ReturnValue.OK, row_effected, entries
+
+###########################################################################
+#                           HW functions                                  #
+###########################################################################
 
 
 def createTables():
@@ -115,10 +144,10 @@ def addTeam(teamID: int) -> ReturnValue:
 
 
 def addMatch(match: Match) -> ReturnValue:
-    match_id = checkNone(match.getMatchID())
-    competition = checkNone(match.getCompetition())
-    home_id = checkNone(match.getHomeTeamID())
-    away_id = checkNone(match.getAwayTeamID())
+    match_id = check_none(match.getMatchID())
+    competition = check_none(match.getCompetition())
+    home_id = check_none(match.getHomeTeamID())
+    away_id = check_none(match.getAwayTeamID())
 
     ret_val, _, _ = sql_query(f'''
         INSERT INTO Matches
@@ -136,18 +165,13 @@ def getMatchProfile(matchID: int) -> Match:
     if ret_val != ReturnValue.OK:
         return Match.badMatch()
     else:
-        return Match(
-            matchID=entries.rows[0][0],
-            competition=entries.rows[0][1],
-            homeTeamID=entries.rows[0][2],
-            awayTeamID=entries.rows[0][3]
-        )
+        return res_to_match(entries)
 
 
 def deleteMatch(match: Match) -> ReturnValue:
     ret_val, row_effected, _ = sql_query(f'''
         DELETE FROM Matches
-        WHERE MatchID = {checkNone(match.getMatchID())}
+        WHERE MatchID = {check_none(match.getMatchID())}
     ''')
     if ret_val.rows_affected == 0:
         return ReturnValue.NOT_EXISTS
@@ -157,7 +181,7 @@ def deleteMatch(match: Match) -> ReturnValue:
 def addPlayer(player: Player) -> ReturnValue:
     ret_val, _, _ = sql_query(f'''
             INSERT INTO Matches
-            VALUES({checkNone(player.getPlayerID())});
+            VALUES({check_none(player.getPlayerID())};
         ''')
     return ret_val
 
@@ -171,15 +195,13 @@ def getPlayerProfile(playerID: int) -> Player:
     if ret_val != ReturnValue.OK:
         return Player.badPlayer()
     else:
-        return Player(
-            playerID=entries.rows[0][0]
-        )
+        return res_to_player(entries)
 
 
 def deletePlayer(player: Player) -> ReturnValue:
     ret_val, row_effected, _ = sql_query(f'''
         DELETE FROM Players
-        WHERE PlayerID = {checkNone(player.getPlayerID())}
+        WHERE MatchID = {check_none(player.getPlayerID())}
     ''')
     if ret_val.rows_affected == 0:
         return ReturnValue.NOT_EXISTS
@@ -188,20 +210,20 @@ def deletePlayer(player: Player) -> ReturnValue:
 
 def addStadium(stadium: Stadium) -> ReturnValue:
     ret_val = None
-    stadiumId = checkNone(stadium.getStadiumID())
+    stadiumId = check_none(stadium.getStadiumID())
     if stadium.getBelongsTo():
         ret_val, _, _ = sql_query(f'''
                 INSERT INTO Matches
                 VALUES({stadiumId});
                 INSERT INTO BelongTo
-                VALUES({stadiumId}, {checkNone(stadium.getBelongsTo())};
+                VALUES({stadiumId}, {check_none(stadium.getBelongsTo())};
             ''')
     else:
         ret_val, _, _ = sql_query(f'''
                 INSERT INTO Stadiums
-                VALUES({checkNone(stadium.getPlayerID())};
+                INSERT
+                VALUES({check_none(stadium.getPlayerID())};
             ''')
-
     return ret_val
 
 
@@ -214,17 +236,13 @@ def getStadiumProfile(stadiumID: int) -> Stadium:
     if ret_val != ReturnValue.OK:
         return Stadium.badStadium()
     else:
-        return Stadium(
-            stadiumID=entries.rows[0][0],
-            capacity=entries.rows[0][1],
-            belongsTo=entries.rows[0][2],
-        )
+        return res_to_stadium(entries)
 
 
 def deleteStadium(stadium: Stadium) -> ReturnValue:
     ret_val, row_effected, _ = sql_query(f'''
             DELETE FROM Stadiums
-            WHERE StadiumID = {checkNone(stadium.getStadiumID())}
+            WHERE StadiumID = {check_none(stadium.getStadiumID())}
         ''')
     if ret_val.rows_affected == 0:
         return ReturnValue.NOT_EXISTS
