@@ -42,13 +42,14 @@ def check_none(attribute):
 
 
 # TODO: change to_print and print_exceptions to False
-def sql_query(query: str, to_print=False, to_commit=True, print_exceptions=True):
+def sql_query(query: str, to_print=False, to_commit=True, print_exceptions=True, is_add_func=False,
+              is_delete_func=False):
     """A wrapper function to all sql queries to avoid duplications"""
     query = query.replace("\n", "")
     conn = None
     # default values to return if no exception happened
     res_dict = {"ret_val": ReturnValue.OK,
-                "row_effected": 0,
+                "row_effected": -1,
                 "entries": Connector.ResultSet()}
 
     try:
@@ -64,15 +65,14 @@ def sql_query(query: str, to_print=False, to_commit=True, print_exceptions=True)
             print(e)
         res_dict["ret_val"] = ReturnValue.ERROR
     except (DatabaseException.CHECK_VIOLATION,
-            DatabaseException.NOT_NULL_VIOLATION,
-            DatabaseException.FOREIGN_KEY_VIOLATION) as e:
+            DatabaseException.NOT_NULL_VIOLATION) as e:
         if print_exceptions:
             print(e)
         res_dict["ret_val"] = ReturnValue.BAD_PARAMS
-    # except  as e:
-    #     if print_exceptions:
-    #         print(e)
-    #     res_dict["ret_val"] = ReturnValue.NOT_EXISTS
+    except DatabaseException.FOREIGN_KEY_VIOLATION as e:
+        if print_exceptions:
+            print(e)
+        res_dict["ret_val"] = ReturnValue.NOT_EXISTS
     except DatabaseException.UNIQUE_VIOLATION as e:
         if print_exceptions:
             print(e)
@@ -85,6 +85,12 @@ def sql_query(query: str, to_print=False, to_commit=True, print_exceptions=True)
         res_dict["row_effected"] = row_effected
         res_dict["entries"] = entries
     finally:
+        if is_add_func:
+            if res_dict["ret_val"] == ReturnValue.NOT_EXISTS:
+                res_dict["ret_val"] = ReturnValue.BAD_PARAMS
+        if is_delete_func:
+            if res_dict["row_effected"] == 0:
+                res_dict["ret_val"] = ReturnValue.NOT_EXISTS
         if conn:
             # TODO: check how to use rollback
             conn.close()
@@ -137,13 +143,21 @@ def createTables():
             FOREIGN KEY (Away) REFERENCES Teams(TeamID) ON DELETE CASCADE,
             PRIMARY KEY (MatchID));
             
-        CREATE TABLE Goals(
+        CREATE TABLE ScoredIn(
             MatchID INTEGER,
             PlayerID INTEGER,
             Goals INTEGER NOT NULL CHECK(Goals > 0),
             FOREIGN KEY (MatchID) REFERENCES Matches(MatchID) ON DELETE CASCADE,
             FOREIGN KEY (PlayerID) REFERENCES Players(PlayerID) ON DELETE CASCADE,
             PRIMARY KEY (MatchID, PlayerID));
+            
+        CREATE TABLE MatchIn(
+            MatchID INTEGER,
+            StadiumID INTEGER,
+            Attended INTEGER NOT NULL CHECK(Attended >= 0),
+            FOREIGN KEY (MatchID) REFERENCES Matches(MatchID) ON DELETE CASCADE,
+            FOREIGN KEY (StadiumID) REFERENCES Stadiums(STADIUMID) ON DELETE CASCADE,
+            PRIMARY KEY (MatchID));
     ''')
 
 
@@ -163,14 +177,16 @@ def dropTables():
         DROP TABLE IF EXISTS Players CASCADE;
         DROP TABLE IF EXISTS Stadiums CASCADE;
         DROP TABLE IF EXISTS Matches CASCADE;
-        DROP TABLE IF EXISTS Goals CASCADE;
+        DROP TABLE IF EXISTS ScoredIn CASCADE;
+        DROP TABLE IF EXISTS MatchIn CASCADE;
     ''')
 
 
 def addTeam(teamID: int) -> ReturnValue:
     res_dict = sql_query(f'''
         INSERT INTO Teams VALUES({teamID});
-    ''')
+    ''', is_add_func=True)
+
     return res_dict["ret_val"]
 
 
@@ -183,17 +199,17 @@ def addMatch(match: Match) -> ReturnValue:
     res_dict = sql_query(f'''
         INSERT INTO Matches
         VALUES({match_id}, '{competition}', {home_id}, {away_id});
-    ''')
+    ''', is_add_func=True)
     return res_dict["ret_val"]
 
 
 def getMatchProfile(matchID: int) -> Match:
     res_dict = sql_query(f'''
-        SELECT *gwe
+        SELECT *
         FROM Matches
         WHERE MatchID = {matchID};
     ''')
-    if res_dict["ret_val"] != ReturnValue.OK:
+    if res_dict["ret_val"] != ReturnValue.OK or res_dict["row_effected"] == 0:
         return Match.badMatch()
     else:
         return res_to_match(res_dict["entries"])
@@ -203,9 +219,8 @@ def deleteMatch(match: Match) -> ReturnValue:
     res_dict = sql_query(f'''
         DELETE FROM Matches
         WHERE MatchID = {check_none(match.getMatchID())};
-    ''')
-    if res_dict["rows_affected"] == 0:
-        return ReturnValue.NOT_EXISTS
+    ''', is_delete_func=True)
+
     return res_dict["ret_val"]
 
 
@@ -219,7 +234,7 @@ def addPlayer(player: Player) -> ReturnValue:
     res_dict = sql_query(f'''
         INSERT INTO Players
         VALUES({player_id}, {team_id}, {player_age}, {player_height}, '{preferred_foot}');
-    ''')
+    ''', is_add_func=True)
     return res_dict["ret_val"]
 
 
@@ -229,7 +244,7 @@ def getPlayerProfile(playerID: int) -> Player:
         FROM Players
         WHERE PlayerID = {playerID};
     ''')
-    if res_dict["ret_val"] != ReturnValue.OK or res_dict["rows_affected"] == 0:
+    if res_dict["ret_val"] != ReturnValue.OK or res_dict["row_effected"] == 0:
         return Player.badPlayer()
     else:
         return res_to_player(res_dict["entries"])
@@ -239,9 +254,8 @@ def deletePlayer(player: Player) -> ReturnValue:
     res_dict = sql_query(f'''
         DELETE FROM Players
         WHERE MatchID = {check_none(player.getPlayerID())};
-    ''')
-    if res_dict["rows_affected"] == 0:
-        return ReturnValue.NOT_EXISTS
+    ''', is_delete_func=True)
+
     return res_dict["ret_val"]
 
 
@@ -252,7 +266,7 @@ def addStadium(stadium: Stadium) -> ReturnValue:
     res_dict = sql_query(f'''
         INSERT INTO Stadiums
         VALUES({stadiumId}, {capacity}, {belongs_to});
-    ''')
+    ''', is_add_func=True)
     return res_dict["ret_val"]
 
 
@@ -262,7 +276,7 @@ def getStadiumProfile(stadiumID: int) -> Stadium:
         FROM Stadiums
         WHERE StadiumID = {stadiumID};
     ''')
-    if res_dict["ret_val"] != ReturnValue.OK:
+    if res_dict["ret_val"] != ReturnValue.OK or res_dict["row_effected"] == 0:
         return Stadium.badStadium()
     else:
         return res_to_stadium(res_dict["entries"])
@@ -272,68 +286,118 @@ def deleteStadium(stadium: Stadium) -> ReturnValue:
     res_dict = sql_query(f'''
         DELETE FROM Stadiums
         WHERE StadiumID = {check_none(stadium.getStadiumID())};
-    ''')
-    if res_dict["rows_affected"] == 0:
-        return ReturnValue.NOT_EXISTS
+    ''', is_delete_func=True)
+
     return res_dict["ret_val"]
 
 
 def playerScoredInMatch(match: Match, player: Player, amount: int) -> ReturnValue:
     match_id = check_none(match.getMatchID())
     player_id = check_none(player.getPlayerID())
-    goal_amount = check_none(amount)
 
     res_dict = sql_query(f'''
-          INSERT INTO Goals
-          VALUES({match_id}, {player_id}, {goal_amount});
-      ''')
+        INSERT INTO ScoredIn
+        VALUES({match_id}, {player_id}, {amount});
+    ''')
     return res_dict["ret_val"]
 
-# TODO: UPDATE instead of INSERT consequences: player may or may not have scored in the match prior to this action
+
 def playerDidntScoreInMatch(match: Match, player: Player) -> ReturnValue:
     match_id = check_none(match.getMatchID())
     player_id = check_none(player.getPlayerID())
 
     res_dict = sql_query(f'''
-        DELETE FROM Goals
-        WHERE PlayerID ={player_id} AND MatchID = {match_id};
-      ''')
-    if res_dict["ret_val"] == ReturnValue.NOT_EXISTS:
-        return ReturnValue.Ok
+        DELETE FROM ScoredIn
+        WHERE PlayerID = {player_id} AND MatchID = {match_id};
+    ''', is_delete_func=True)
+
     return res_dict["ret_val"]
 
 
 def matchInStadium(match: Match, stadium: Stadium, attendance: int) -> ReturnValue:
-    pass
+    match_id = check_none(match.getMatchID())
+    stadium_id = check_none(stadium.getStadiumID())
+
+    res_dict = sql_query(f'''
+        INSERT INTO MatchIn
+        VALUES({match_id}, {stadium_id}, {attendance});
+    ''')
+
+    return res_dict["ret_val"]
 
 
 def matchNotInStadium(match: Match, stadium: Stadium) -> ReturnValue:
-    pass
+    match_id = check_none(match.getMatchID())
+    stadium_id = check_none(stadium.getStadiumID())
+
+    res_dict = sql_query(f'''
+        DELETE FROM MatchIn
+        WHERE MatchID = {match_id} AND StadiumID = {stadium_id};
+    ''', is_delete_func=True)
+
+    return res_dict["ret_val"]
 
 
 def averageAttendanceInStadium(stadiumID: int) -> float:
-    pass
+    res_dict = sql_query(f'''
+        SELECT AVG(Attended)
+        FROM MatchIn
+        WHERE StadiumID = {stadiumID};
+    ''')
+
+    # TODO: check the 0 division edge case
+    # TODO: check the first condition works
+    if not res_dict["entries"]:
+        return 0
+    elif res_dict["ret_val"] != ReturnValue.OK:
+        return -1
+    else:
+        return res_dict["entries"].rows[0][0]
 
 
 def stadiumTotalGoals(stadiumID: int) -> int:
-    pass
+    res_dict = sql_query(f'''
+        SELECT SUM(Goals)
+        FROM ScoredIn
+        WHERE StadiumID = {stadiumID};
+    ''')
+
+    # TODO: check the first condition works
+    if not res_dict["entries"]:
+        return 0
+    elif res_dict["ret_val"] != ReturnValue.OK:
+        return -1
+    else:
+        return res_dict["entries"].rows[0][0]
 
 
 def playerIsWinner(playerID: int, matchID: int) -> bool:
+    # res_dict = sql_query(f'''
+    #         SELECT
+    #         FROM (Match - Goals) GoalsInMatches, ScoredIn S
+    #         WHERE GoalsInMatches.MatchID = {matchID} AND S.PlayerID = {playerID};
+    #     ''')
     pass
 
 
 def getActiveTallTeams() -> List[int]:
-    res_dict = sql_query(f'''
-        SELECT TeamID
-        FROM PLAYERS
-        WHERE Height >= 190
-        GROUP BY TeamID
-        HAVING COUNT(TeamID) >= 2
-        ORDER BY TeamID DESC
-        LIMIT 5;
-      ''')
-    return res_dict["ret_val"]
+    # res_dict = sql_query(f'''
+    #     SELECT TeamID
+    #     FROM PLAYERS
+    #     WHERE Height >= 190
+    #     GROUP BY TeamID
+    #     HAVING COUNT(TeamID) >= 2
+    #     ORDER BY TeamID DESC
+    #     LIMIT 5;
+    # ''')
+    # entries = res_dict["entries"]
+    # ret_val = []
+    # try:
+    #     for i in range(0, 5):
+    #         ret_val.append(entries[i][0])
+    # finally:
+    #     return ret_val
+    pass
 
 
 def getActiveTallRichTeams() -> List[int]:
@@ -349,6 +413,21 @@ def getMostAttractiveStadiums() -> List[int]:
 
 
 def mostGoalsForTeam(teamID: int) -> List[int]:
+    # res_dict = sql_query(f'''
+    #     SELECT PlayerID, COUNT(Goals)
+    #     FROM ScoredIn
+    #     WHERE TeamID == {teamID}
+    #     GROUP BY PlayerID
+    #     ORDER BY Goals DESC, PlayerID DESC
+    #     LIMIT 5;
+    #   ''')
+    # entries = res_dict["entries"]
+    # ret_val = []
+    # try:
+    #     for i in range(0, 5):
+    #         ret_val.append(entries[i][0])
+    # finally:
+    #     return ret_val
     pass
 
 
