@@ -158,6 +158,23 @@ def createTables():
             FOREIGN KEY (MatchID) REFERENCES Matches(MatchID) ON DELETE CASCADE,
             FOREIGN KEY (StadiumID) REFERENCES Stadiums(STADIUMID) ON DELETE CASCADE,
             PRIMARY KEY (MatchID));
+        
+        CREATE VIEW MatchAndTotalGoals AS
+            SELECT MatchID, SUM(Goals) AS TotalGoals
+            FROM ScoredIn
+            GROUP BY MatchID;
+        
+        CREATE VIEW ActiveTallTeams AS 
+            SELECT TeamID
+            FROM Players, Matches
+            WHERE Height > 190 AND (TeamID = Home OR TeamID = Away)
+            GROUP BY TeamID
+            HAVING COUNT(TeamID) >= 2;
+            
+        CREATE VIEW RichTeams AS 
+            SELECT TeamID
+            FROM Stadiums
+            WHERE Capacity > 55000;
     ''')
 
 
@@ -179,6 +196,9 @@ def dropTables():
         DROP TABLE IF EXISTS Matches CASCADE;
         DROP TABLE IF EXISTS ScoredIn CASCADE;
         DROP TABLE IF EXISTS MatchIn CASCADE;
+        DROP TABLE IF EXISTS MatchAndTotalGoals;
+        DROP TABLE IF EXISTS ActiveTallTeams;
+        DROP TABLE IF EXISTS RichTeams;
     ''')
 
 
@@ -372,40 +392,69 @@ def stadiumTotalGoals(stadiumID: int) -> int:
 
 
 def playerIsWinner(playerID: int, matchID: int) -> bool:
-    # res_dict = sql_query(f'''
-    #         SELECT
-    #         FROM (Match - Goals) GoalsInMatches, ScoredIn S
-    #         WHERE GoalsInMatches.MatchID = {matchID} AND S.PlayerID = {playerID};
-    #     ''')
-    pass
+    res_dict = sql_query(f'''
+        SELECT S.PlayerID
+        FROM MatchAndTotalGoals INNER JOIN ScoredIn
+        WHERE MatchID = {matchID} AND PlayerID = {playerID} AND Goals >= (2 * TotalGoals);
+    ''')
+
+    if res_dict["entries"]:
+        return True
+    else:
+        return False
 
 
 def getActiveTallTeams() -> List[int]:
-    # res_dict = sql_query(f'''
-    #     SELECT TeamID
-    #     FROM PLAYERS
-    #     WHERE Height >= 190
-    #     GROUP BY TeamID
-    #     HAVING COUNT(TeamID) >= 2
-    #     ORDER BY TeamID DESC
-    #     LIMIT 5;
-    # ''')
-    # entries = res_dict["entries"]
-    # ret_val = []
-    # try:
-    #     for i in range(0, 5):
-    #         ret_val.append(entries[i][0])
-    # finally:
-    #     return ret_val
-    pass
+    res_dict = sql_query(f'''
+        SELECT * FROM ActiveTallTeams
+        ORDER BY TeamID DESC
+        LIMIT 5;
+    ''')
+
+    res = []
+    try:
+        for i in range(5):
+            res.append(res_dict["entries"][i][0])
+    finally:
+        return res
 
 
 def getActiveTallRichTeams() -> List[int]:
-    pass
+    res_dict = sql_query(f'''
+        SELECT * 
+        FROM ActiveTallTeams INTERSECT RichTeams
+        ORDER BY TeamID ASC
+        LIMIT 5;
+    ''')
+
+    res = []
+    try:
+        for i in range(5):
+            res.append(res_dict["entries"][i][0])
+    finally:
+        return res
 
 
 def popularTeams() -> List[int]:
-    pass
+    res_dict = sql_query(f'''
+        SELECT TeamID
+        FROM (SELECT TeamID FROM ((MatchIn INNER JOIN Matches), Teams) WHERE TeamID = Home)
+        EXCEPT (SELECT TeamID FROM ((MatchIn UNION Matches), Teams) WHERE TeamID = Home AND Attended <= 40000)
+        
+        (SELECT TeamID                                                                                      , MatchID FROM (Matches LEFT OUTER JOIN MatchIn), Teams WHERE TeamID = Home)
+        EXCEPT
+        (SELECT Home AS TeamID FROM Matches LEFT OUTER JOIN MatchIn WHERE Attended <= 40000 OR Attended = NULL)
+        
+        ORDER BY TeamID ASC
+        LIMIT 5);
+    ''')
+
+    res = []
+    try:
+        for i in range(10):
+            res.append(res_dict["entries"][i][0])
+    finally:
+        return res
 
 
 def getMostAttractiveStadiums() -> List[int]:
