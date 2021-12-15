@@ -175,6 +175,7 @@ def createTables():
             SELECT TeamID
             FROM Stadiums
             WHERE Capacity > 55000;
+            
     ''')
 
 
@@ -458,27 +459,60 @@ def popularTeams() -> List[int]:
 
 
 def getMostAttractiveStadiums() -> List[int]:
+    res_dict = sql_query(f'''
+        SELECT StadiumID, COUNT(TotalGoals) AS StadiumGoals
+        FROM MatchAndTotalGoals INNER JOIN MatchIn
+        GROUP BY StadiumID
+        ORDER BY StadiumGoals DESC, StadiumID ASC
+      ''')
+    entries = res_dict["entries"]
+    ret_val = []
+    try:
+        for i in range(0, len(entries)):
+            ret_val.append(entries[i][0])
+    finally:
+        return ret_val
     pass
 
 
 def mostGoalsForTeam(teamID: int) -> List[int]:
-    # res_dict = sql_query(f'''
-    #     SELECT PlayerID, COUNT(Goals)
-    #     FROM ScoredIn
-    #     WHERE TeamID == {teamID}
-    #     GROUP BY PlayerID
-    #     ORDER BY Goals DESC, PlayerID DESC
-    #     LIMIT 5;
-    #   ''')
-    # entries = res_dict["entries"]
-    # ret_val = []
-    # try:
-    #     for i in range(0, 5):
-    #         ret_val.append(entries[i][0])
-    # finally:
-    #     return ret_val
+    res_dict = sql_query(f'''
+        SELECT PlayerID, COUNT(Goals)
+        FROM ScoredIn
+        WHERE TeamID = {teamID}
+        GROUP BY PlayerID
+        ORDER BY Goals DESC, PlayerID DESC
+        LIMIT 5;
+      ''')
+    entries = res_dict["entries"]
+    ret_val = []
+    try:
+        for i in range(0, 5):
+            ret_val.append(entries[i][0])
+    finally:
+        return ret_val
     pass
 
 
 def getClosePlayers(playerID: int) -> List[int]:
+    res_dict = sql_query(f'''
+        SELECT PlayerID
+        FROM    (SELECT PlayerID, COALESCE(COUNT(*), 0) AS ScoredWithPlayer
+                 FROM ScoredIn AS A, ScoredIn AS B
+                 WHERE B.PlayerID = {playerID} AND A.MatchID = B.MatchID
+                 GROUP BY PlayerID) AS SharedMatches 
+        WHERE PlayerID != {playerID} AND ScoredWithPlayer >=  0.5*(SELECT COUNT(*) 
+                                                                FROM SharedMatches
+                                                                WHERE PlayerID = {playerID}
+                                                                )
+        ORDER BY PlayerID ASC
+        LIMIT 10;
+      ''')
+    entries = res_dict["entries"]
+    ret_val = []
+    try:
+        for i in range(0, 5):
+            ret_val.append(entries[i][0])
+    finally:
+        return ret_val
     pass
