@@ -180,7 +180,6 @@ def createTables():
             SELECT BelongsTo AS TeamID
             FROM Stadiums
             WHERE Capacity > 55000;
-            
     ''')
 
 
@@ -466,7 +465,7 @@ def popularTeams() -> List[int]:
         (SELECT Home AS TeamID FROM Matches LEFT OUTER JOIN MatchIn WHERE Attended <= 40000 OR Attended = NULL))
         
         ORDER BY TeamID ASC
-        LIMIT 5);
+        LIMIT 10);
     ''')
 
     res = []
@@ -479,11 +478,16 @@ def popularTeams() -> List[int]:
 
 def getMostAttractiveStadiums() -> List[int]:
     res_dict = sql_query(f'''
-        SELECT MatchIn.StadiumID, COUNT(MatchAndTotalGoals.TotalGoals) AS StadiumGoals
-        FROM MatchAndTotalGoals INNER JOIN MatchIn
-        ON MatchAndTotalGoals.MatchID=MatchIn.MatchID
-        GROUP BY MatchIn.StadiumID
-        ORDER BY StadiumGoals DESC, MatchIn.StadiumID ASC
+        Select Stadiums.StadiumID AS STID, COALESCE(StadiumGoals.Goals, 0) AS Goals
+        FROM (Stadiums LEFT JOIN 
+        ( 
+            SELECT MatchIn.StadiumID AS StadiumID, Sum(MatchAndTotalGoals.TotalGoals) AS Goals
+            FROM MatchAndTotalGoals INNER JOIN MatchIn
+            ON MatchAndTotalGoals.MatchID=MatchIn.MatchID
+            GROUP BY MatchIn.StadiumID
+        ) AS StadiumGoals  
+        ON Stadiums.StadiumID=StadiumGoals.StadiumID)
+        ORDER BY Goals DESC, STID ASC;              
       ''')
     entries = res_dict["entries"]
     ret_val = []
@@ -497,12 +501,18 @@ def getMostAttractiveStadiums() -> List[int]:
 
 def mostGoalsForTeam(teamID: int) -> List[int]:
     res_dict = sql_query(f'''
-        SELECT PlayerID, COUNT(Goals)
-        FROM ScoredIn
-        WHERE TeamID = {teamID}
-        GROUP BY PlayerID
-        ORDER BY Goals DESC, PlayerID DESC
-        LIMIT 5;
+        Select TeamPlayers.PlayerID AS PID, COALESCE(Scorers.Goals, 0) AS Goals
+        FROM ((Select * FROM Players WHERE TeamID={teamID}) AS TeamPlayers LEFT JOIN 
+        ( 
+            SELECT Players.PlayerID AS PlayerID, SUM(ScoredIn.Goals) AS Goals
+            FROM ScoredIn INNER JOIN Players
+            ON ScoredIn.PlayerID = Players.PlayerID
+            WHERE Players.TeamID = {teamID}
+            GROUP BY Players.PlayerID
+        ) AS Scorers  
+        ON TeamPlayers.PlayerID=Scorers.PlayerID)
+        ORDER BY Goals DESC, PID DESC
+        LIMIT 5;              
       ''')
     entries = res_dict["entries"]
     ret_val = []
