@@ -172,7 +172,7 @@ def createTables():
             HAVING COUNT(TeamID) >= 2;
             
         CREATE VIEW RichTeams AS 
-            SELECT TeamID
+            SELECT BelongsTo AS TeamID
             FROM Stadiums
             WHERE Capacity > 55000;
             
