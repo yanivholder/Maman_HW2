@@ -16,7 +16,12 @@ from psycopg2 import sql
 
 
 def res_to_player(result_set: Connector.ResultSet) -> Player:
-    return Player(playerID=result_set.rows[0][0])
+    return Player(playerID=result_set.rows[0][0],
+                  teamID=result_set.rows[0][1],
+                  age=result_set.rows[0][2],
+                  height=result_set.rows[0][3],
+                  foot=result_set.rows[0][4]
+                  )
 
 
 def res_to_match(result_set: Connector.ResultSet) -> Match:
@@ -42,7 +47,7 @@ def check_none(attribute):
 
 
 # TODO: change to_print and print_exceptions to False
-def sql_query(query: str, to_print=False, to_commit=True, print_exceptions=True, is_add_func=False,
+def sql_query(query: str, to_print=False, to_commit=True, print_exceptions=False, is_add_func=False,
               is_delete_func=False):
     """A wrapper function to all sql queries to avoid duplications"""
     query = query.replace("\n", "")
@@ -120,7 +125,7 @@ def createTables():
         
         CREATE TABLE Players(
             PlayerID INTEGER NOT NULL UNIQUE CHECK(PlayerID > 0),
-            TeamID INTEGER,
+            TeamID INTEGER NOT NULL,
             Age INTEGER NOT NULL CHECK(Age > 0),
             Height INTEGER NOT NULL CHECK(Height > 0),
             Preferred_foot TEXT NOT NULL CHECK(Preferred_foot='Right' OR Preferred_foot='Left'),
@@ -137,8 +142,8 @@ def createTables():
         CREATE TABLE Matches(
             MatchID INTEGER NOT NULL UNIQUE CHECK(MatchID > 0),
             Competition TEXT NOT NULL CHECK(Competition='International' OR Competition='Domestic'),
-            Home INTEGER,
-            Away INTEGER CHECK(Away <> Home),
+            Home INTEGER NOT NULL,
+            Away INTEGER NOT NULL CHECK(Away <> Home),
             FOREIGN KEY (Home) REFERENCES Teams(TeamID) ON DELETE CASCADE,
             FOREIGN KEY (Away) REFERENCES Teams(TeamID) ON DELETE CASCADE,
             PRIMARY KEY (MatchID));
@@ -274,7 +279,7 @@ def getPlayerProfile(playerID: int) -> Player:
 def deletePlayer(player: Player) -> ReturnValue:
     res_dict = sql_query(f'''
         DELETE FROM Players
-        WHERE MatchID = {check_none(player.getPlayerID())};
+        WHERE PlayerID = {check_none(player.getPlayerID())};
     ''', is_delete_func=True)
 
     return res_dict["ret_val"]
@@ -373,14 +378,23 @@ def averageAttendanceInStadium(stadiumID: int) -> float:
     elif res_dict["ret_val"] != ReturnValue.OK:
         return -1
     else:
-        return res_dict["entries"].rows[0][0]
+        result = res_dict["entries"].rows[0][0]
+        if (result):
+            return res_dict["entries"].rows[0][0]
+        return 0
+
 
 
 def stadiumTotalGoals(stadiumID: int) -> int:
     res_dict = sql_query(f'''
         SELECT SUM(Goals)
-        FROM ScoredIn
-        WHERE StadiumID = {stadiumID};
+        FROM (
+                Select MatchID
+                FROM MatchIn
+                WHERE StadiumID = {stadiumID}
+              ) AS StadMatches
+        INNER JOIN ScoredIn
+        ON StadMatches.MatchID=ScoredIn.MatchID;
     ''')
 
     # TODO: check the first condition works
@@ -389,17 +403,21 @@ def stadiumTotalGoals(stadiumID: int) -> int:
     elif res_dict["ret_val"] != ReturnValue.OK:
         return -1
     else:
-        return res_dict["entries"].rows[0][0]
+        result = res_dict["entries"].rows[0][0]
+        if (result):
+            return res_dict["entries"].rows[0][0]
+        return 0
 
 
 def playerIsWinner(playerID: int, matchID: int) -> bool:
     res_dict = sql_query(f'''
-        SELECT S.PlayerID
+        SELECT ScoredIn.PlayerID
         FROM MatchAndTotalGoals INNER JOIN ScoredIn
-        WHERE MatchID = {matchID} AND PlayerID = {playerID} AND Goals >= (2 * TotalGoals);
+        ON MatchAndTotalGoals.MatchID = ScoredIn.MatchID
+        WHERE ScoredIn.MatchID = {matchID} AND ScoredIn.PlayerID = {playerID} AND MatchAndTotalGoals.TotalGoals <= (2 * ScoredIn.Goals);
     ''')
 
-    if res_dict["entries"]:
+    if len(res_dict["entries"].rows) > 0:
         return True
     else:
         return False
@@ -415,15 +433,16 @@ def getActiveTallTeams() -> List[int]:
     res = []
     try:
         for i in range(5):
-            res.append(res_dict["entries"][i][0])
+            res.append(res_dict["entries"].rows[i][0])
     finally:
         return res
 
 
 def getActiveTallRichTeams() -> List[int]:
     res_dict = sql_query(f'''
-        SELECT * 
-        FROM ActiveTallTeams INTERSECT RichTeams
+        SELECT * FROM ActiveTallTeams
+        INTERSECT
+        SELECT * FROM RichTeams
         ORDER BY TeamID ASC
         LIMIT 5;
     ''')
@@ -431,7 +450,7 @@ def getActiveTallRichTeams() -> List[int]:
     res = []
     try:
         for i in range(5):
-            res.append(res_dict["entries"][i][0])
+            res.append(res_dict["entries"].rows[i][0])
     finally:
         return res
 
@@ -440,11 +459,11 @@ def popularTeams() -> List[int]:
     res_dict = sql_query(f'''
         SELECT TeamID
         FROM (SELECT TeamID FROM ((MatchIn INNER JOIN Matches), Teams) WHERE TeamID = Home)
-        EXCEPT (SELECT TeamID FROM ((MatchIn UNION Matches), Teams) WHERE TeamID = Home AND Attended <= 40000)
+        EXCEPT ((SELECT TeamID FROM ((MatchIn UNION Matches), Teams) WHERE TeamID = Home AND Attended <= 40000)
         
-        (SELECT TeamID                                                                                      , MatchID FROM (Matches LEFT OUTER JOIN MatchIn), Teams WHERE TeamID = Home)
+        (SELECT TeamID, MatchID FROM (Matches LEFT OUTER JOIN MatchIn), Teams WHERE TeamID = Home)
         EXCEPT
-        (SELECT Home AS TeamID FROM Matches LEFT OUTER JOIN MatchIn WHERE Attended <= 40000 OR Attended = NULL)
+        (SELECT Home AS TeamID FROM Matches LEFT OUTER JOIN MatchIn WHERE Attended <= 40000 OR Attended = NULL))
         
         ORDER BY TeamID ASC
         LIMIT 5);
@@ -453,23 +472,24 @@ def popularTeams() -> List[int]:
     res = []
     try:
         for i in range(10):
-            res.append(res_dict["entries"][i][0])
+            res.append(res_dict["entries"].rows[i][0])
     finally:
         return res
 
 
 def getMostAttractiveStadiums() -> List[int]:
     res_dict = sql_query(f'''
-        SELECT StadiumID, COUNT(TotalGoals) AS StadiumGoals
+        SELECT MatchIn.StadiumID, COUNT(MatchAndTotalGoals.TotalGoals) AS StadiumGoals
         FROM MatchAndTotalGoals INNER JOIN MatchIn
-        GROUP BY StadiumID
-        ORDER BY StadiumGoals DESC, StadiumID ASC
+        ON MatchAndTotalGoals.MatchID=MatchIn.MatchID
+        GROUP BY MatchIn.StadiumID
+        ORDER BY StadiumGoals DESC, MatchIn.StadiumID ASC
       ''')
     entries = res_dict["entries"]
     ret_val = []
     try:
-        for i in range(0, len(entries)):
-            ret_val.append(entries[i][0])
+        for i in range(0, len(entries.rows)):
+            ret_val.append(entries.rows[i][0])
     finally:
         return ret_val
     pass
@@ -488,7 +508,7 @@ def mostGoalsForTeam(teamID: int) -> List[int]:
     ret_val = []
     try:
         for i in range(0, 5):
-            ret_val.append(entries[i][0])
+            ret_val.append(entries.rows[i][0])
     finally:
         return ret_val
     pass
@@ -512,7 +532,7 @@ def getClosePlayers(playerID: int) -> List[int]:
     ret_val = []
     try:
         for i in range(0, 5):
-            ret_val.append(entries[i][0])
+            ret_val.append(entries.rows[i][0])
     finally:
         return ret_val
     pass
