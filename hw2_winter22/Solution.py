@@ -456,16 +456,33 @@ def getActiveTallRichTeams() -> List[int]:
 
 def popularTeams() -> List[int]:
     res_dict = sql_query(f'''
-        SELECT TeamID
-        FROM (SELECT TeamID FROM ((MatchIn INNER JOIN Matches), Teams) WHERE TeamID = Home)
-        EXCEPT ((SELECT TeamID FROM ((MatchIn UNION Matches), Teams) WHERE TeamID = Home AND Attended <= 40000)
+        SELECT TEAMID 
+        FROM (
+            SELECT HOME AS TEAMID
+            FROM
+            (
+                SELECT HOME, MIN(CASE WHEN ATTENDED > 40000 THEN 1 ELSE 0 END) AS POPULAR
+                FROM MATCHES
+                LEFT JOIN MATCHIN ON MATCHES.MATCHID = MATCHIN.MATCHID
+                GROUP BY HOME
+            )
+            AS BOB
+            WHERE POPULAR = 1
+        ) AS IDO
+        UNION ALL
         
-        (SELECT TeamID, MatchID FROM (Matches LEFT OUTER JOIN MatchIn), Teams WHERE TeamID = Home)
-        EXCEPT
-        (SELECT Home AS TeamID FROM Matches LEFT OUTER JOIN MatchIn WHERE Attended <= 40000 OR Attended = NULL))
-        
-        ORDER BY TeamID ASC
-        LIMIT 10);
+        SELECT TEAMID
+        FROM
+        (
+            SELECT TEAMID, MIN(CASE WHEN HOME = NULL THEN 1 ELSE 0 END) AS NOTHOME
+            FROM TEAMS
+            LEFT JOIN MATCHES ON TEAMS.TEAMID = MATCHES.HOME
+            GROUP BY TEAMID
+        )
+        AS DYLAN
+        WHERE NOTHOME = 1
+        ORDER BY TEAMID DESC
+        LIMIT 10;
     ''')
 
     res = []
@@ -479,14 +496,14 @@ def popularTeams() -> List[int]:
 def getMostAttractiveStadiums() -> List[int]:
     res_dict = sql_query(f'''
         Select Stadiums.StadiumID AS STID, COALESCE(StadiumGoals.Goals, 0) AS Goals
-        FROM (Stadiums LEFT JOIN 
+        FROM Stadiums LEFT JOIN 
         ( 
             SELECT MatchIn.StadiumID AS StadiumID, Sum(MatchAndTotalGoals.TotalGoals) AS Goals
             FROM MatchAndTotalGoals INNER JOIN MatchIn
             ON MatchAndTotalGoals.MatchID=MatchIn.MatchID
             GROUP BY MatchIn.StadiumID
         ) AS StadiumGoals  
-        ON Stadiums.StadiumID=StadiumGoals.StadiumID)
+        ON Stadiums.StadiumID=StadiumGoals.StadiumID
         ORDER BY Goals DESC, STID ASC;              
       ''')
     entries = res_dict["entries"]
@@ -526,16 +543,41 @@ def mostGoalsForTeam(teamID: int) -> List[int]:
 
 def getClosePlayers(playerID: int) -> List[int]:
     res_dict = sql_query(f'''
-        SELECT PlayerID
-        FROM    (SELECT PlayerID, COALESCE(COUNT(*), 0) AS ScoredWithPlayer
-                 FROM ScoredIn AS A, ScoredIn AS B
-                 WHERE B.PlayerID = {playerID} AND A.MatchID = B.MatchID
-                 GROUP BY PlayerID) AS SharedMatches 
-        WHERE PlayerID != {playerID} AND ScoredWithPlayer >=  0.5*(SELECT COUNT(*) 
-                                                                FROM SharedMatches
-                                                                WHERE PlayerID = {playerID}
-                                                                )
-        ORDER BY PlayerID ASC
+    SELECT PLAYERID
+    FROM
+    (
+        SELECT PLAYERID, COUNT(*) AS NUM_MATCHES
+        FROM
+        (
+            SELECT MATCHID
+            FROM SCOREDIN
+            WHERE PLAYERID = {playerID}
+        )AS MATCHES
+        INNER JOIN SCOREDIN ON MATCHES.MATCHID = SCOREDIN.MATCHID
+        WHERE PLAYERID != {playerID}
+        GROUP BY PLAYERID
+    )OTHER_PLAYERS
+    LEFT JOIN
+    (
+        SELECT COUNT(*) AS TOT_PLAYER_MATCHES
+        FROM SCOREDIN
+        WHERE PLAYERID = {playerID}
+    )AS OUR_PLAYER
+    ON 1=1
+    WHERE OTHER_PLAYERS.NUM_MATCHES >= 0.5 * OUR_PLAYER.TOT_PLAYER_MATCHES
+    
+    UNION ALL
+    
+    SELECT PLAYERID
+    FROM PLAYERS
+    JOIN
+    (
+        SELECT COUNT(*) AS TOT_PLAYER_MATCHES
+        FROM SCOREDIN
+        WHERE PLAYERID = {playerID}
+    ) AS OUR_PLAYER_EMPTY
+    ON 0 = TOT_PLAYER_MATCHES
+    ORDER BY PlayerID ASC
         LIMIT 10;
       ''')
     entries = res_dict["entries"]
