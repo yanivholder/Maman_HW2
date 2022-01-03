@@ -466,21 +466,23 @@ def popularTeams() -> List[int]:
                 LEFT JOIN MATCHIN ON MATCHES.MATCHID = MATCHIN.MATCHID
                 GROUP BY HOME
             )
-            AS BOB
+            AS BooleanPopulars
             WHERE POPULAR = 1
-        ) AS IDO
+        ) AS PopularHome
+        
         UNION ALL
         
         SELECT TEAMID
         FROM
         (
-            SELECT TEAMID, MIN(CASE WHEN HOME = NULL THEN 1 ELSE 0 END) AS NOTHOME
+            SELECT TEAMID, MIN(CASE WHEN HOME IS NULL THEN 1 ELSE 0 END) AS NOTHOME
             FROM TEAMS
             LEFT JOIN MATCHES ON TEAMS.TEAMID = MATCHES.HOME
             GROUP BY TEAMID
         )
         AS DYLAN
         WHERE NOTHOME = 1
+        
         ORDER BY TEAMID DESC
         LIMIT 10;
     ''')
@@ -552,11 +554,11 @@ def getClosePlayers(playerID: int) -> List[int]:
             SELECT MATCHID
             FROM SCOREDIN
             WHERE PLAYERID = {playerID}
-        )AS MATCHES
+        ) AS MATCHES
         INNER JOIN SCOREDIN ON MATCHES.MATCHID = SCOREDIN.MATCHID
         WHERE PLAYERID != {playerID}
         GROUP BY PLAYERID
-    )OTHER_PLAYERS
+    ) OTHER_PLAYERS
     LEFT JOIN
     (
         SELECT COUNT(*) AS TOT_PLAYER_MATCHES
