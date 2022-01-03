@@ -480,8 +480,8 @@ def popularTeams() -> List[int]:
             LEFT JOIN MATCHES ON TEAMS.TEAMID = MATCHES.HOME
             GROUP BY TEAMID
         )
-        AS DYLAN
-        WHERE NOTHOME = 1
+        AS BooleanNeverPlayedHome
+        WHERE NotHome = 1
         
         ORDER BY TEAMID DESC
         LIMIT 10;
@@ -558,20 +558,26 @@ def getClosePlayers(playerID: int) -> List[int]:
         INNER JOIN SCOREDIN ON MATCHES.MATCHID = SCOREDIN.MATCHID
         WHERE PLAYERID != {playerID}
         GROUP BY PLAYERID
-    ) OTHER_PLAYERS
+    ) AS OTHER_PLAYERS
     LEFT JOIN
     (
         SELECT COUNT(*) AS TOT_PLAYER_MATCHES
         FROM SCOREDIN
         WHERE PLAYERID = {playerID}
-    )AS OUR_PLAYER
+    ) AS OUR_PLAYER
     ON 1=1
     WHERE OTHER_PLAYERS.NUM_MATCHES >= 0.5 * OUR_PLAYER.TOT_PLAYER_MATCHES
     
     UNION ALL
     
     SELECT PLAYERID
-    FROM PLAYERS
+    FROM 
+    (
+        SELECT A.PLAYERID AS PLAYERID 
+        FROM PLAYERS AS A JOIN PLAYERS AS B
+        ON 1 = 1
+        WHERE B.PLAYERID = {playerID} 
+    ) AS PLAYER_POOL
     JOIN
     (
         SELECT COUNT(*) AS TOT_PLAYER_MATCHES
@@ -579,13 +585,16 @@ def getClosePlayers(playerID: int) -> List[int]:
         WHERE PLAYERID = {playerID}
     ) AS OUR_PLAYER_EMPTY
     ON 0 = TOT_PLAYER_MATCHES
+    WHERE PLAYERID <> {playerID}
+    
     ORDER BY PlayerID ASC
         LIMIT 10;
       ''')
+
     entries = res_dict["entries"]
     ret_val = []
     try:
-        for i in range(0, 5):
+        for i in range(0, 10):
             ret_val.append(entries.rows[i][0])
     finally:
         return ret_val
