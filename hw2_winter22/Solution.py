@@ -169,12 +169,16 @@ def createTables():
             FROM ScoredIn
             GROUP BY MatchID;
         
-        CREATE VIEW ActiveTallTeams AS 
-            SELECT TeamID
+        CREATE VIEW ValidTallPeople AS 
+            SELECT DISTINCT PlayerID, TeamID
             FROM Players, Matches
-            WHERE Players.Height > 190 AND (Players.TeamID = Matches.Home OR Players.TeamID = Matches.Away)
+            WHERE Players.Height > 190 AND (Players.TeamID = Matches.Home OR Players.TeamID = Matches.Away);
+           
+        CREATE VIEW ActiveTallTeams AS
+            SELECT TeamID
+            FROM ValidTallPeople
             GROUP BY TeamID
-            HAVING COUNT(TeamID) >= 2;
+            HAVING COUNT(*) >= 2;
         
         CREATE VIEW RichTeams AS 
             SELECT BelongsTo AS TeamID
@@ -423,6 +427,9 @@ def playerIsWinner(playerID: int, matchID: int) -> bool:
 
 
 def getActiveTallTeams() -> List[int]:
+    res_dict = sql_query(f'''
+        SELECT * FROM Players;
+    ''')
     res_dict = sql_query(f'''
         SELECT * FROM ActiveTallTeams
         ORDER BY TeamID DESC
