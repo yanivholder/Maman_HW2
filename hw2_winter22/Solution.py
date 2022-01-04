@@ -172,10 +172,10 @@ def createTables():
         CREATE VIEW ActiveTallTeams AS 
             SELECT TeamID
             FROM Players, Matches
-            WHERE Height > 190 AND (TeamID = Home OR TeamID = Away)
+            WHERE Players.Height > 190 AND (Players.TeamID = Matches.Home OR Players.TeamID = Matches.Away)
             GROUP BY TeamID
             HAVING COUNT(TeamID) >= 2;
-            
+        
         CREATE VIEW RichTeams AS 
             SELECT BelongsTo AS TeamID
             FROM Stadiums
@@ -554,19 +554,19 @@ def getClosePlayers(playerID: int) -> List[int]:
             SELECT MATCHID
             FROM SCOREDIN
             WHERE PLAYERID = {playerID}
-        ) AS MATCHES
-        INNER JOIN SCOREDIN ON MATCHES.MATCHID = SCOREDIN.MATCHID
+        ) AS Player_Goal_Matches
+        INNER JOIN SCOREDIN ON Player_Goal_Matches.MATCHID = SCOREDIN.MATCHID
         WHERE PLAYERID != {playerID}
         GROUP BY PLAYERID
-    ) AS OTHER_PLAYERS
+    ) AS Other_Players_Matches
     LEFT JOIN
     (
         SELECT COUNT(*) AS TOT_PLAYER_MATCHES
         FROM SCOREDIN
         WHERE PLAYERID = {playerID}
-    ) AS OUR_PLAYER
+    ) AS Our_Player_Matches
     ON 1=1
-    WHERE OTHER_PLAYERS.NUM_MATCHES >= 0.5 * OUR_PLAYER.TOT_PLAYER_MATCHES
+    WHERE Other_Players_Matches.NUM_MATCHES >= 0.5 * Our_Player_Matches.TOT_PLAYER_MATCHES
     
     UNION ALL
     
